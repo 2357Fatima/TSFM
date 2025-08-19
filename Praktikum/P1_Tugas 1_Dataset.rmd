@@ -1,1 +1,50 @@
+---
+title: "Dataset Time Series"
+author: "Fatima Azzahra"
+date: "2025-08-19"
+output: html_document
+---
+
+## Import Dataset Awal
+```{r}
+library(readr)
+library(dplyr)
+rawdt <- read_csv("D:\\DA_PORTO\\R\\Study Case\\FMCG_2022_2024.csv")
+glimpse(rawdt)
+```
+
+## Kolom Data yang digunakan
+```{r}
+#Daily records
+dtts <- rawdt %>%
+  mutate(total_revenue = price_unit * units_sold) %>%
+  select(date, total_revenue)
+head(dtts)
+```
+
+```{r}
+# Monthly aggregate
+library(zoo)
+dtts_monthly <- dtts %>%
+  mutate(month = as.yearmon(date)) %>%   
+  group_by(month) %>%
+  summarise(total_revenue = sum(total_revenue, na.rm = TRUE), .groups = "drop")
+print(dtts_monthly)
+```
+
+## Visualisasi
+```{r}
+library(ggplot2)
+ggplot(dtts_monthly, aes(x = month, y = total_revenue)) +
+  geom_line(color = "blue") +
+  geom_point(color = "darkgrey") +
+  labs(title = "Total Revenue per Month",
+       x = "Time Period",
+       y = "Total Revenue ($)") +
+  theme_minimal()
+```
+
+
+
+
 
