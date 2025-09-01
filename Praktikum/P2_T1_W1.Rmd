@@ -1,0 +1,358 @@
+---
+title: "Weather VPdef (Row 1-100)"
+author: "Fatima Azzahra - G1401231036"
+date: "2025-08-31"
+output:
+  html_document:
+    toc: true
+    toc_depth: 3
+    toc_float: true
+    number_sections: true
+    theme: united
+  pdf_document:
+    toc: true
+    toc_depth: '3'
+editor_options:
+ 
+  markdown:
+   wrap: 72
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
+library("lubridate")
+library("readr")
+library("readxl")
+library("dplyr")
+library("forecast")
+library("graphics")
+library("TTR")
+library("TSA")
+library("ggplot2")
+```
+
+# Import Dataset and Data Preparation
+
+**Description** Dataset ini merupakan pencatatan berbagai macam komponen terkait cuaca dengan periode pencatatan per 10 menit dari tanggal 1 Januari 2020 sampai 31 Desember 2020. Analisis akan difokuskan pada peubah VPdef (Vapor Pressure Deficit).
+
+Terkait cakupan analisis untuk tugas ini, akan dianalisis 100 baris pertama untuk peubah VPdef dengan cakupan periodenya yaitu 1 Januari 2020 pada menit ke-10 sampai 16:40.
+
+```{r}
+weather <- read_csv("D:\\TAHUN 3\\G1_MPDW\\cleaned_weather.csv")
+View(weather)
+str(weather)
+```
+
+```{r}
+# Change date format from chr to datetime
+weather <- weather %>%
+  mutate(datetime = mdy_hm(date))
+# new dataframe with datetime and VPdef as respond variable
+weather1 <- weather %>%
+  select(datetime, VPdef)
+View(weather1)
+str(weather1)
+```
+
+```{r}
+# Check if there's missing value from time frequency per day
+weather1 %>%
+  group_by(date_only = as.Date(datetime)) %>%
+  summarise(n_obs = n(), .groups = "drop") %>%
+  filter(n_obs != 144)
+```
+
+**Note: Missing Value and Duplicate**
+
+Per hari harusnya memiliki **144 observasi** karena mencatat data parameter cuaca dalam 24 jam per 10 menit. Hasil filtering tersebut mengindikasikan adanya missing value dan duplicate yang perlu ditangani bila analisis melibatkan observasi tersebut. Khusus pada data 2020-01-01 memang dicatat dari menit ke-10, data pada tanggal **5 dan 12 Mei 2020** saja yang perlu ditangani.
+
+# Exploring My Data Partition: Row 1-100
+
+```{r}
+# Create the data subset
+w1 <- weather1[1:100,]
+head(w1, 20)
+View(w1)
+```
+
+```{r}
+# Change the data format to time series using 'ts' function
+w1.ts <- ts(w1$VPdef)
+summary(w1.ts)
+w1.ts
+```
+
+**Note: Time Series Data Frequency**
+
+Pada tahap eksplorasi awal ini digunakan frequency = 1 karena baru mengamati observasi dalam skala yang kecil.
+
+```{r}
+ts.plot(w1.ts, xlab="Time Period", ylab="VPdef", 
+        main = "1 Jan (0:10 - 16:40)")
+points(w1.ts)
+```
+
+Berdasarkan plot, data deret waktunya **tidak stasioner**.
+
+### Splitting Data into Training and Testing
+
+Pembagian data latih dan data uji dilakukan dengan perbandingan **80:20** untuk data latih dan data uji.
+
+```{r}
+#split training data and testing data
+training <- w1[1:80,]
+testing <- w1[81:100,]
+train.ts <- ts(training$VPdef)
+test.ts <- ts(testing$VPdef)
+```
+
+### Plotting Time Series Data
+
+Eksplorasi data dilakukan pada keseluruhan data, data latih serta data uji menggunakan plot data deret waktu.
+
+```{r}
+# explore entire data
+plot(w1.ts, col="red",main="Plot semua data")
+points(w1.ts)
+
+# explore training data
+plot(train.ts, col="blue",main="Plot data latih")
+points(train.ts)
+
+# explore testing data
+plot(test.ts, col="blue",main="Plot data uji")
+points(test.ts)
+```
+
+```{r}
+# explore with ggplot2
+library(ggplot2)
+ggplot() + 
+  geom_line(data = training, aes(x = datetime, y = VPdef, col = "Training")) +
+  geom_line(data = testing, aes(x = datetime, y = VPdef, col = "Testing")) +
+  labs(x = "Time Period", y = "VPdef", color = "Legend") +
+  scale_colour_manual(name="Description:", breaks = c("Training", "Testing"),
+                      values = c("blue", "red")) + 
+  theme_bw() + theme(legend.position = "bottom",
+                     plot.caption = element_text(hjust=0.5, size=12))
+```
+
+## Single Exponential Smoothing
+
+-   **Ide dasar**: Data yang terdahulu tidak terlalu berpengaruh pada data saat ini. Memberikan pembobotan eksponensial menurun, nilai data yang lebih baru, bobotnya lebih besar dibanding data terdahulu.
+
+-   **Tipe**: pola stasioner atau konstan.
+
+-   **Prinsip** **dasar**:
+
+    Nilai pemulusan pada periode ke-t didapat dari persamaan:
+
+    $$
+    \tilde{y}_T=\lambda y_t+(1-\lambda)\tilde{y}_{T-1}
+    $$
+
+    Nilai parameter $\lambda$ adalah nilai antara 0 dan 1.
+
+    Nilai pemulusan periode ke-t bertindak sebagai nilai ramalan pada periode ke-$(T+\tau)$.
+
+    $$
+    \tilde{y}_{T+\tau}(T)=\tilde{y}_T
+    $$
+
+SES menggunakan fungsi **HoltWinters()** dengan nilai **alpha = 0.7** dan nilai **alpha optimal** saat alpha dibuat NULL.
+
+```{r}
+# SES with HoltWinters function
+ses<- HoltWinters(train.ts, gamma = FALSE, beta = FALSE, alpha = 0.7)
+plot(ses)
+# Forecast
+ramal<- forecast(ses, h=20)
+ramal
+
+# SES with HoltWinters function
+ses.opt<- HoltWinters(train.ts, gamma = FALSE, beta = FALSE, alpha = NULL)
+plot(ses.opt)
+ses.opt
+# Forecast
+ramal.opt<- forecast(ses.opt, h=20)
+ramal.opt
+```
+
+Setelah dilakukan peramalan, akan dilakukan perhitungan keakuratan hasil peramalan. Perhitungan akurasi ini dilakukan baik pada data latih dan data uji.
+
+#### Akurasi Data Latih
+
+```{r}
+# Manual procedure
+fitted<-ramal$fitted
+sisaan<-ramal$residuals
+head(sisaan)
+
+resid<-training$VPdef-ramal$fitted
+head(resid)
+
+SSE = sum(sisaan[2:length(train.ts)]^2)
+MSE = SSE/length(train.ts)
+MAPE = sum(abs(sisaan[2:length(train.ts)]/train.ts[2:length(train.ts)])*
+               100)/length(train.ts)
+
+akurasi <- matrix(c(SSE,MSE,MAPE))
+row.names(akurasi)<- c("SSE", "MSE", "MAPE")
+colnames(akurasi) <- c("Akurasi lamda = 0.7")
+akurasi
+
+fitted.opt<-ramal.opt$fitted
+sisaan.opt<-ramal.opt$residuals
+head(sisaan.opt)
+
+resid.opt<-training$VPdef-ramal.opt$fitted
+head(resid.opt)
+
+SSE.opt=sum(sisaan.opt[2:length(train.ts)]^2)
+MSE.opt = SSE.opt/length(train.ts)
+MAPE.opt = sum(abs(sisaan.opt[2:length(train.ts)]/train.ts[2:length(train.ts)])*
+               100)/length(train.ts)
+
+akurasi.opt <- matrix(c(SSE.opt,MSE.opt,MAPE.opt))
+row.names(akurasi.opt)<- c("SSE", "MSE", "MAPE")
+colnames(akurasi.opt) <- c("Akurasi lamda = 0.99")
+akurasi.opt
+```
+
+#### Akurasi Data Uji
+
+```{r}
+selisih<-ramal$mean-testing$VPdef
+SSEtesting<-sum(selisih^2)
+MSEtesting<-SSEtesting/length(testing)
+
+selisih.opt<-ramal.opt$mean-testing$VPdef
+SSEtesting.opt<-sum(selisih.opt^2)
+MSEtesting.opt<-SSEtesting.opt/length(testing)
+
+akurasitesting1 <- matrix(c(SSEtesting,SSEtesting.opt))
+row.names(akurasitesting1)<- c("SSE", "SSEopt")
+akurasitesting1
+
+akurasitesting2 <- matrix(c(MSEtesting,MSEtesting.opt))
+row.names(akurasitesting2)<- c("MSE", "MSEopt")
+akurasitesting2
+```
+
+#### Kesimpulan
+
+```{r}
+# Use accuracy() function from package 'forecast'
+accuracy(ramal,testing$VPdef)
+accuracy(ramal.opt,testing$VPdef)
+```
+
+Berdasarkan nilai SSE, MSE,dan MAPE, kedua parameter memiliki perbedaan nilai yang tidak terlalu jauh. Tetapi, parameter $\lambda = 0.7$ sudah cukup akurat dalam merepresentasikan data.
+
+## Double Exponensial Smoothing
+
+-   **Ide dasar**: Mirip SES tetapi pemulusannya dua kali yaitu untuk tahapan *level* dan *tren*. Hasil peramalannya tidak konstan untuk periode berikutnya.
+
+-   **Tipe**: pola tren.
+
+DES menggunakan fungsi **HoltWinters()** dengan nilai *beta = 0.7*, *alpha = 0.8* dan versi NULL.
+
+```{r}
+# Lamda=0.7 & gamma=0.5
+des<- HoltWinters(train.ts, gamma = FALSE, beta = 0.7, alpha = 0.8)
+plot(des)
+
+# Forecast
+ramaldes<- forecast(des, h=20)
+ramaldes
+
+# Lamda=0.7 & gamma-optimal
+des.opt<- HoltWinters(train.ts, gamma = FALSE)
+des.opt
+plot(des.opt)
+
+# Forecast
+ramaldes.opt<- forecast(des.opt, h=20)
+ramaldes.opt
+```
+
+Selanjutnya akan dilakukan perhitungan akurasi pada data latih maupun data uji dengan ukuran akurasi SSE, MSE dan MAPE.
+
+#### Akurasi Data Latih
+
+```{r}
+ssedes.train<-des$SSE
+msedes.train<-ssedes.train/length(train.ts)
+sisaandes<-ramaldes$residuals
+head(sisaandes)
+
+mapedes.train <- sum(abs(sisaandes[3:length(train.ts)]/train.ts[3:length(train.ts)])
+                      *100)/length(train.ts)
+
+akurasides <- matrix(c(ssedes.train,msedes.train,mapedes.train))
+row.names(akurasides)<- c("SSE", "MSE", "MAPE")
+colnames(akurasides) <- c("Akurasi lamda=0.8 dan gamma=0.7")
+akurasides
+
+ssedes.train.opt<-des.opt$SSE
+msedes.train.opt<-ssedes.train.opt/length(train.ts)
+sisaandes.opt<-ramaldes.opt$residuals
+head(sisaandes.opt)
+
+mapedes.train.opt <- sum(abs(sisaandes.opt[3:length(train.ts)]/train.ts[3:length(train.ts)])
+                      *100)/length(train.ts)
+
+akurasides.opt <- matrix(c(ssedes.train.opt,msedes.train.opt,mapedes.train.opt))
+row.names(akurasides.opt)<- c("SSE", "MSE", "MAPE")
+colnames(akurasides.opt) <- c("Akurasi lamda=1 dan gamma=0.24")
+akurasides.opt
+```
+
+#### Akurasi Data Uji
+
+```{r}
+selisihdes<-ramaldes$mean-testing$VPdef
+selisihdes
+
+SSEtestingdes<-sum(selisihdes^2)
+MSEtestingdes<-SSEtestingdes/length(testing$VPdef)
+MAPEtestingdes<-sum(abs(selisihdes/testing$VPdef)*100)/length(testing$VPdef)
+
+selisihdes.opt<-ramaldes.opt$mean-testing$VPdef
+selisihdes.opt
+
+SSEtestingdes.opt<-sum(selisihdes.opt^2)
+MSEtestingdes.opt<-SSEtestingdes.opt/length(testing$VPdef)
+MAPEtestingdes.opt<-sum(abs(selisihdes.opt/testing$VPdef)*100)/length(testing$VPdef)
+
+akurasitestingdes <-
+  matrix(c(SSEtestingdes,MSEtestingdes,MAPEtestingdes,SSEtestingdes.opt,MSEtestingdes.opt,
+           MAPEtestingdes.opt),
+         nrow=3,ncol=2)
+row.names(akurasitestingdes)<- c("SSE", "MSE", "MAPE")
+colnames(akurasitestingdes) <- c("des","des opt")
+akurasitestingdes
+```
+
+Berdasarkan nilai SSE, MSE,dan MAPE, kombinasi parameter $\lambda = 0.8$ dan $\gamma = 0.7$ memiliki MAPE data uji yang lebih baik dibandingkan parameter optimalnya.
+
+#### Perbandingan SES dan DES
+
+```{r}
+MSEfull <-
+  matrix(c(MSEtesting,MSEtesting.opt,MSEtestingdes,MSEtestingdes.opt),nrow=2,ncol=2)
+row.names(MSEfull)<- c("ske", "ske opt")
+colnames(MSEfull) <- c("ses","des")
+MSEfull
+```
+
+Kedua metode dapat dibandingkan dengan ukuran akurasi MSE. Hasilnya didapatkan metode *DES lebih baik* dibandingkan metode SES, dilihat dari MSE yang lebih kecil nilainya.
+
+# Conclusion
+
+Berdasarkan hasil evaluasi menggunakan metode Double Exponential Smoothing ($\lambda = 0.8$ dan $\gamma = 0.7$), nilai MAPE pada data training (6.6%) dan testing (14.2%) menunjukkan akurasi yang baik, serta nilai MSE yang rendah (0.2), sehingga metode ini dinyatakan cocok untuk data tersebut.
+
+Metode lain seperti Moving Average tidak diterapkan karena menghasilkan SSE dan MSE yang sangat besar, metode ini tidak dapat menangkap fluktuasi data dan memang lebih cocok untuk data stasioner yang konstan. Lalu, metode Winter tidak diterapkan karena pada 100 data ini belum menunjukkan pola musiman.
