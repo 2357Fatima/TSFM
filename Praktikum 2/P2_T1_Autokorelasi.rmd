@@ -1,1 +1,195 @@
+---
+title: "Penanganan Autokorelasi"
+author: "Fatima Azzahra - G1401231036"
+date: "2025-08-28"
+output:
+  html_document:
+    toc: true
+    toc_depth: 4
+    toc_float: true
+    css: "D:/style.css"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
+library(readr)
+library(dplyr)
+library(lmtest)
+library(devtools)
+library(orcutt)
+library(HoRM)
+```
+
+# Tahap 1: Import data
+```{r}
+ipmn <- read_csv("D:\\TAHUN 3\\G1_MPDW\\P2\\bps-od_15042_indeks_pmbngnn_manusia__prov_di_indonesia_data.csv")
+View(ipmn)
+```
+```{r}
+plot(ipmn$Tahun, ipmn$IPM, type = "o", col = "blue",
+     main = "Rata-Rata IPM per Tahun",
+     xlab = "Tahun", ylab = "IPM Score")
+```
+**Deskripsi:**  
+Dataset ini berisi rata-rata skor IPM Nasional periode 2010-2024.
+
+# Tahap 2: Pembuatan Model
+
+```{r}
+# Meregresikan Y thd X untuk peroleh galat e_t
+model <- lm(ipmn$IPM~ipmn$Tahun)
+summary(model)
+```
+**Observasi Awal:**
+**Nilai Adjusted R-squared sangat tinggi (0.9234)** dan koefisien Tahun **sangat signifikan (p-value \< 0.001)**.
+
+# Tahap 3: Diagnosis (Investigasi Sisaan)
+
+## 3.1. Diagnosis Visual
+
+```{r}
+sisaan <- residuals(model)
+sisaan
+```
+
+```{r}
+# Plot sisaan terhadap waktu
+plot(ipmn$Tahun, sisaan, type="o", pch=20, col="red",
+     main="Plot Sisaan vs Waktu", xlab="Tahun", ylab="Sisaan")
+abline(h=0, lty=2) # Garis referensi di y=0
+```
+**Kecurigaan:**
+Plot di atas menunjukkan pola yang **tidak acak**. Sisaan cenderung berpola linier sehingga ada indikasi kuat adanya autokorelasi.
+
+```{r}
+acf(sisaan, main = "Plot ACF IPMN")
+```
+**Kecurigaan:**
+Terdapat indikasi autokorelasi di lag-1
+
+```{r}
+pacf(sisaan, main = "Plot PACF IPMN")
+```
+**Kecurigaan:**
+Terdapat indikasi autokorelasi di lag-1
+
+## 3.2. Diagnosis Formal (Uji Durbin-Watson)
+
+```{r}
+dwtest(model)
+```
+**Hasil Investigasi:**
+
+-   P-value yang dihasilkan **sangat kecil (0.0001108)**, yaitu di bawah tingkat signifikansi 0.05.
+
+-   Kesimpulan: Kita **menolak H0**. Bukti sudah kuat. Model kita **terbukti menderita autokorelasi**.
+
+
+# Tahap 4: Penanganan Autokorelasi
+
+## 4.1 Metode Cochrane Orcutt
+
+```{r}
+model_co <- cochrane.orcutt(model)
+summary(model_co)
+
+# rho paling optimum
+rho <- model_co$rho
+cat("Rho optimum:", rho)
+```
+**Verifikasi Manual:**
+
+```{r}
+ipmn.t <- ipmn$IPM[-1] - ipmn$IPM[-15]*rho
+
+tahun.t <- ipmn$Tahun[-1] - ipmn$Tahun[-15]*rho
+model_co_manual <- lm(ipmn.t~tahun.t)
+
+b0_co_manual <- coef(model_co_manual)[1]/(1-rho)
+b1_co_manual <- coef(model_co_manual)[2]
+cat("Koefisien manual Cochrane-Orcutt:\n")
+cat("b0:", b0_co_manual, "\n")
+cat("b1:", b1_co_manual, "\n")
+```
+```{r}
+dwtest(model_co)
+```
+**Hasil Transformasi Cochrane Orcutt:**
+Jika dibandingkan dengan model OLS yang menghasilkan Adj R-Square  0.9234 serta signifikansi peubah yang sangat kuat, di hasil transformasi Cochrane-Orcutt terjadi **penurunan pada Adj R-Square menjadi 0.3673 serta signifikansi peubahnyapun menurun**. Namun, hasil transformasi berhasil mengatasi autokorelasi dengan p-value = 0.4961 > 0.05, sehingga model lebih bisa diandalkan untuk uji lanjutan.
+
+## 4.2 Hildreth-Lu
+
+```{r}
+hildreth.lu.func<- function(r, model){
+  x <- model.matrix(model)[,-1]
+  y <- model.response(model.frame(model))
+  n <- length(y)
+  t <- 2:n
+  y <- y[t]-r*y[t-1]
+  x <- x[t]-r*x[t-1]
+  
+  return(lm(y~x))
+}
+
+#Pencariab rho yang meminimumkan SSE
+r <- c(seq(0.1,0.9, by= 0.1))
+tab <- data.frame("rho" = r, "SSE" = sapply(r, function(i){deviance(hildreth.lu.func(i, model))}))
+round(tab, 4)
+```
+
+```{r}
+#Rho optimal di sekitar 0.7
+rOpt <- seq(0.6,0.9, by= 0.001)
+tabOpt <- data.frame("rho" = rOpt, "SSE" = sapply(rOpt, function(i){deviance(hildreth.lu.func(i, model))}))
+head(tabOpt[order(tabOpt$SSE),])
+```
+
+```{r}
+#Grafik SSE optimum
+par(mfrow = c(1,1))
+plot(tab$SSE ~ tab$rho , type = "l", xlab = "Rho", ylab = "SSE")
+abline(v = tabOpt[tabOpt$SSE==min(tabOpt$SSE),"rho"], lty = 2, col="red",lwd=2)
+text(x=0.736	, y=3.652700, labels = "rho=0.736", cex = 0.8)
+```
+```{r}
+model_hl <- hildreth.lu(ipmn$IPM, ipmn$Tahun, rho = 0.736)
+summary(model_hl)
+```
+```{r}
+#Transformasi Balik
+cat("y = ", coef(model_hl)[1]/(1-0.736), "+", coef(model_hl)[2],"x", sep = "")
+```
+
+```{r}
+#Deteksi autokorelasi
+dwtest(model_hl)
+```
+**Hasil Transformasi Cochrane Orcutt:**
+Jika dibandingkan dengan model OLS yang menghasilkan Adj R-Square  0.9234 serta signifikansi peubah yang sangat kuat, di hasil transformasi Cochrane-Orcutt terjadi **penurunan pada Adj R-Square menjadi 0.3677 serta signifikansi peubahnya pun menurun**. Namun, hasil transformasi berhasil mengatasi autokorelasi dengan p-value = 0.4959 > 0.05, sehingga model lebih bisa diandalkan untuk uji lanjutan.
+
+# Tahap 5: Evaluasi Akhir Metode Penanganan Autokorelasi
+
+```{r}
+# Menghitung SSE untuk setiap model secara manual
+sse <- sum(residuals(model)^2)
+sse_co <- sum(residuals(model_co)^2)
+sse_hl <- sum(residuals(model_hl)^2)
+
+# Membuat tabel perbandingan
+data.frame(
+  Metode = c("Model Awal (Sakit)", "Cochrane-Orcutt (Sehat)", "Hildreth-Lu (Sehat)"),
+  SSE = c(sse, sse_co, sse_hl),
+  DW_Statistic = c(dwtest(model)$statistic, model_co$DW[3], dwtest(model_hl)$statistic)
+)
+
+```
+**Kesimpulan:**
+Pada penanganan autokorelasi model IPM Nasional dapat disimpulkan bahwa **metode Hildreth-Lu menghasilkan model paling baik** dengan SSE yang mengecil dibandingkan dengan model OLSnya (3.652700) serta mengatasi autokorelasi (DW = 2.1624021).
+
+
+
+
 
