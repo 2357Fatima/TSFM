@@ -1,1 +1,576 @@
+---
+title: "Pengaruh Lag"
+author: "Fatima Azzahra - G1401231036"
+date: "2025-09-09"
+output: 
+html_document:
+    toc: true
+    toc_depth: 4
+    toc_float: true
+    css: "D:/style.css"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
+library(readr)
+library(dplyr)
+library(ggplot2)
+library(dLagM)
+library(dynlm)
+library(MLmetrics)
+library(lmtest)
+```
+
+# Tahap 1: Penyiapan Data
+
+**Import Dataset**
+
+```{r}
+air <- read.csv("D:\\TAHUN 3\\G1_MPDW\\P3\\NewDelhi_Air_quality.csv")
+View(air)
+```
+
+```{r}
+# Cek struktur dataset
+str(air)
+```
+
+**Formatting kolom timestamp_utc dari chr ke datetime**
+
+```{r}
+library(lubridate)
+air$timestamp_utc <- ymd_hms(air$timestamp_utc, tz = "UTC")
+```
+
+**Cek duplikasi data**
+
+```{r}
+sum(duplicated(air$timestamp_utc))
+```
+
+**Cek kelengkapan deret waktu**
+
+```{r}
+time_full <- seq(min(air$timestamp_utc), max(air$timestamp_utc), by = "1 hour")
+missing_times <- setdiff(time_full, air$timestamp_utc)
+length(missing_times)
+```
+
+# Tahap 2: Pemilihan peubah X
+
+## A. Korelasi Polutan dengan AQI
+
+```{r}
+library(tidyr)
+
+# Ubah ke long format
+air_long <- air %>%
+  pivot_longer(cols = c(pm25, pm10, CO, so2, no2, o3),
+               names_to = "Polutan",
+               values_to = "Konsentrasi")
+
+# Hitung korelasi per polutan
+cor_vals <- air_long %>%
+  group_by(Polutan) %>%
+  summarise(r = cor(AQI, Konsentrasi, use = "complete.obs", method = "pearson"))
+
+# Plot dengan korelasi ditulis manual
+ggplot(air_long, aes(x = Konsentrasi, y = AQI)) +
+  geom_point(alpha=0.6) +
+  geom_smooth(method = "lm", se = FALSE, color = "red") +
+  facet_wrap(~Polutan, scales = "free_x") +
+  geom_text(data = cor_vals, 
+            aes(x = -Inf, y = Inf, 
+                label = paste0("r = ", round(r, 2))), 
+            hjust = -0.1, vjust = 1.2, inherit.aes = FALSE) +
+  labs(x="Konsentrasi Polutan", y="Air Quality Index", title = "Scatterplot AQI dengan Polutan") +
+  theme_minimal() +
+  theme(
+    panel.grid = element_blank(),               # hapus grid
+    panel.spacing = unit(1.2, "cm"),            # jarak antar facet
+    strip.text = element_text(face = "bold")    # tebal nama facet (judul tiap polutan)
+  )
+```
+
+Berdasarkan scatterplot, Polutan Ozon ($O_3$) memiliki korelasi positif paling tinggi sebesar 0.97. Kuatnya hubungan linier antar kedua peubah ini menjadi alasan pertama dalam pemilihan Ozon ($O_3$) sebagai peubah X dalam pemodelan.
+
+## B. Literatur Terkait
+
+**Ozon**\
+Ozon adalah polutan sekunder yang terbentuk ketika gas Nitrogen Oksida ($NO_x$) bercampur dengan senyawa organik volatil lain di udara, lalu bereaksi karena sinar matahari. Berbeda dengan Ozon Stratosfer yang berperan sebagai pelindung dari paparan sinar UV, Ozon Toposfer atau yang terbentuk di dekat permukaan tanah dapat berdampak serius bagi kesehatan dan perubahan iklim.
+
+Paparan jangka panjang terhadap ozon ini dapat berakibat pada Penyakit Paru Obstruktif Kronis (PPOK) yang berkembang secara perlahan dan membuat orang semakin kesulitan bernapas. Diperkirakan ada 489.000 kasus kematian di seluruh dunia akibat paparan Ozon, dimana 5.010 diantaranya terjadi di Indonesia (Data 2021).
+
+Pencemaran Ozon juga berpengaruh terhadap perubahan iklim karena Ozon termasuk gas rumah kaca yang ikut menyumbang peningkatan suhu global. Pembentukan Ozon juga dapat dipercepat seiring menghangatnya udara atau gelombang panas.
+
+Sumber: *Ozone*. State of Global Air.[diakses 2025 Sep 14]. <https://www.stateofglobalair.org/pollution-sources/ozone>
+
+**Perhitungan AQI**\
+AQI dihitung dengan cara mengonversi nilai masing-masing polutan ($CO, NO_2, O_3, PM_{10}, PM_{2.5},  SO_2$) menjadi skor AQI dengan rumus baku. Dari hasil tersebut, nilai AQI final ditentukan oleh polutan dengan skor tertinggi, karena polutan itulah yang paling berbahaya dan berisiko bagi kesehatan pada saat itu. Jadi, meskipun polutan lain rendah, satu polutan dengan skor tinggi sudah cukup untuk menurunkan kualitas udara secara keseluruhan.
+
+-   0–50: Udara baik, tidak berisiko bagi kesehatan.
+
+-   51–100: Sedang, umumnya aman tapi sebagian orang bisa merasa tidak nyaman.
+
+-   101–150: Tidak sehat bagi kelompok sensitif, bisa muncul gangguan pernapasan.
+
+-   151–200: Tidak sehat, mulai berdampak pada masyarakat umum.
+
+-   201–300: Sangat tidak sehat, peringatan kesehatan darurat, semua orang berisiko terdampak.
+
+-   301–500: Berbahaya, dampak serius seperti sesak napas, iritasi saluran pernapasan, hingga ancaman keselamatan.
+
+Sumber: Shikha Sharma. 2021 Sep 27. *What is Air Quality Index (AQI) & How Is It Calculated?*. Prana Air.[diakses 2025 Sep 14]. <https://www.pranaair.com/blog/what-is-air-quality-index-aqi-and-its-calculation/>
+
+# Tahap 3: Eksplorasi Data
+
+```{r}
+# Formatting data jadi time series dengan fungsi ts()
+aqi.ts <- ts(air$AQI)
+summary(aqi.ts)
+aqi.ts
+```
+
+```{r}
+ts.plot(aqi.ts, xlab="Periode", ylab="AQI", 
+        main = "22-24 Okt")
+points(aqi.ts)
+```
+
+```{r}
+# Formatting data jadi time series dengan fungsi ts()
+o3.ts <- ts(air$o3)
+summary(o3.ts)
+o3.ts
+```
+
+```{r}
+ts.plot(o3.ts, xlab="Periode", ylab="Ozon", 
+        main = "22-24 Okt") +
+points(o3.ts)
+```
+
+```{r}
+# Formatting data jadi time series dengan fungsi ts()
+so2.ts <- ts(air$so2)
+co.ts <- ts(air$CO)
+no2.ts <- ts(air$no2)
+pm10.ts <- ts(air$pm10)
+pm25.ts <- ts(air$pm25)
+```
+
+```{r}
+par(mfrow = c(3, 2))  # grid 4 baris x 2 kolom
+
+ts.plot(aqi.ts, main = "AQI", xlab="Time", ylab="AQI", col="black")
+ts.plot(o3.ts, main = "O3", xlab="Time", ylab="O3", col="blue")
+ts.plot(so2.ts, main = "SO2", xlab="Time", ylab="SO2", col="red")
+ts.plot(co.ts, main = "CO", xlab="Time", ylab="CO", col="red")
+ts.plot(no2.ts, main = "NO2", xlab="Time", ylab="NO2", col="red")
+ts.plot(pm25.ts, main = "PM2.5", xlab="Time", ylab="PM2.5", col="red")
+ts.plot(pm10.ts, main = "PM10", xlab="Time", ylab="PM10", col="red")
+
+par(mfrow = c(1,1))  # reset layout
+```
+
+Terdapat kemiripan antara pola time series skor AQI dengan Ozon. Hal ini dapat mengindikasikan adanya dominansi Ozon dalam penentuan skor akhir AQI. Hal ini menarik untuk dianalisis lebih lanjut terutama untuk mengetahui polutan mana yang paling berpengaruh signifikan terhadap penentuan skor AQI (konteks analisis regresi) dan mengetahui apakah Ozon menyebabkan fluktuasi AQI (konteks analisis deret waktu).
+
+```{r}
+summary(air$AQI)
+boxplot(air$AQI, main = "AQI")
+summary(air$o3)
+boxplot(air$o3, main = "Ozon")
+```
+
+Skor AQI 19 - 32 menunjukkan kualitas udara berada dalam rentang yang sangat baik, sedangkan pada Ozon mediannya sebesar 57.22 masuk dalam rentang moderat atau meninmbulkan ketidaknyamanan bagi kelompok yang sensitif. Beberapa outlier hanya terdapat pada skor kecil (indikasi kualitas udara yang baik).
+
+# Tahap 4: Pengecekan asumsi
+## A. Asumsi Autokorelasi
+```{r}
+Y <- air$AQI
+X <- air$o3
+model <- lm(Y ~ X)
+summary(model)
+```
+
+```{r}
+sisaan <- residuals(model)
+```
+
+```{r}
+plot(air$timestamp_utc, sisaan, type="o", pch=20, col="red",
+     main="Plot Sisaan vs Waktu", xlab="Periode", ylab="Sisaan")
+abline(h=0, lty=2) 
+```
+
+**Kecurigaan:**\
+Plot di atas menunjukkan adanya pola yang **tidak acak**. Terdapat sisaan yang cenderung berpola linier sehingga mengindikasikan adanya autokorelasi.
+
+```{r}
+acf(sisaan, main = "Plot ACF")
+pacf(sisaan, main = "Plot PACF")
+```
+
+**Kecurigaan:**\
+Terdapat indikasi autokorelasi di lag-1.
+
+```{r}
+dwtest(model)
+```
+**Hasil Investigasi:**\
+
+-   P value yang dihasilkan sangat kecil, jauh di bawah tingkat sin=gnifikansi 0.05.
+
+-   Kesimpulannya Tolak $H_0$, sudah cukup bukti untuk menyatakan model memiliki autokorelasi. 
+## B. Asumsi Lainnya
+```{r}
+check_model(model)
+```
+Berdasarkan uji grafik ini, tidak terdapat amatan berpengaruh yang dapat mengganggu model. Asumsi lainnya dicek lebih lanjut dengan uji formal berikut:\
+
+**Normalitas Sisaan**
+Sisaan tidak menyebar normal.
+```{r}
+shapiro.test(sisaan)
+```
+
+**Homogenitas Ragam Sisaan**
+Ragam sisaan homogen.
+```{r}
+bptest(model)
+```
+
+**Nilai Harapan Sisaan**
+Nilai Harapan Sisaan = 0.
+```{r}
+t.test(sisaan, mu = 0,conf.level = 0.95)
+```
+**Hasil Investigasi:**\
+
+-   Asumsi normalitas sisaan belum terpenuhi.
+
+# Tahap 5: Regresi dengan Peubah Lag
+
+```{r}
+rl <- air %>%
+  select(timestamp_utc, AQI, o3)
+```
+
+## Splitting Data
+```{r}
+n <- nrow(rl)
+train_size <- floor(0.8 * n)
+
+train <- rl[1:train_size, ]       
+test <- rl[(train_size + 1):n, ] 
+```
+
+```{r}
+Y <- rl$AQI
+X <- rl$o3
+train_Y <- window(Y, end = time(Y)[train_size])
+train_X <- window(X, end = time(X)[train_size])
+
+test_Y <- window(Y, start = time(Y)[train_size + 1])
+test_X <- window(X, start = time(X)[train_size + 1])
+```
+
+```{r}
+rl <- rl %>%
+  mutate(dataset = ifelse(row_number() <= train_size, "Train", "Test"))
+
+rl_long <- rl %>%
+  pivot_longer(cols = c(AQI, o3), names_to = "Peubah", values_to = "Nilai")
+
+ggplot(rl_long, aes(x = timestamp_utc, y = Nilai, color = dataset, linetype = Peubah)) +
+  geom_line(size = 1) +
+  labs(title = "Training vs Testing: Ozon dan AQI",
+       x = "Periode",
+       color = "Dataset",
+       linetype = "Peubah") +
+  theme_minimal()
+```
+
+## A. Koyck Model
+
+**Intuisi:** Model Koyck memiliki asumsi **pengaruh dari masa lalu akan semakin melemah seiring berjalannya waktu**.\
+
+Secara matematis, Koyck menyederhanakan model yang memiliki tak hingga lag menjadi model yang jauh lebih simpel dengan memasukkan **lag dari variabel dependen** $(Y_{t−1})$ sebagai salah satu prediktor. $Y_{t−1}$ ini secara implisit sudah merangkum semua informasi dari lag X di masa lalu.\
+
+**Formula Umum:**\
+$$ y_t=a(1-\lambda)+\beta_0X_t+\beta_1Z_t+\lambda Y_{t-1}+V_t $$
+dengan $$V_t=u_t-\lambda u_{t-1}$$
+Di mana $\lambda$ (koefisien dari $Y_{t−1}$) menunjukkan "tingkat peluruhan" atau seberapa cepat pengaruh masa lalu memudar.\
+
+**PEMODELAN**
+```{r}
+train.ts<-ts(train)
+test.ts<-ts(test)
+rl.ts<-ts(rl)
+```
+
+```{r}
+model.koyck <- koyckDlm(x = train$o3, y = train$AQI)
+summary(model.koyck)
+AIC(model.koyck)
+BIC(model.koyck)
+```
+**Interpretasi Hasil:**\
+
+-   Dari `summary`, kita dapatkan model:
+
+    $$\hat{Y_t}=0.54798+0.25830X_t+0.41955Y_{t-1}$$
+
+-   Koefisien $X_t$ (0.25830) signifikan, artinya nilai \$X\$ saat ini berpengaruh terhadap $Y$.
+
+-   Koefisien $Y_{t−1}$ (0.41955) juga signifikan. Ini adalah **estimasi** $\lambda$. Nilai ini menunjukkan bahwa sekitar 42% dari efek di periode sebelumnya masih "terbawa" ke periode saat ini.
+
+**PERAMALAN DAN AKURASI**
+
+Berikut adalah hasil peramalan y untuk 15 periode kedepan menggunakan model koyck
+
+```{r}
+fore.koyck <- dLagM::forecast(model = model.koyck, x = test$o3, h=nrow(test))
+fore.koyck
+mape.koyck <- MAPE(fore.koyck$forecasts, test$AQI)
+mape.koyck # MAPE Data Test
+
+GoF(model.koyck) # Akurasi Data Training
+```
+- **MAPE (test) = 3.2%**
+- **MAPE (train) = 1.4%**
+
+```{r}
+koyck_plot <- data.frame(
+  Time = test$timestamp_utc,
+  Actual = test$AQI,
+  Predicted = fore.koyck$forecasts
+)
+
+ggplot(koyck_plot, aes(x = Time)) +
+  geom_line(aes(y = Actual, color = "Aktual"), size = 1) +
+  geom_line(aes(y = Predicted, color = "Forecast"), size = 1) +
+  labs(title = "Model Koyck: Prediksi vs Aktual (Data Test AQI)",
+       x = "Periode",
+       y = "AQI",
+       color = "Data") +
+  theme_minimal()
+```
+
+## B. Distributed Lag Model
+
+**Intuisi:** Model DLM lebih fleksibel dengan **tidak membuat asumsi** tentang pola peluruhan pengaruh. Sebaliknya, dilakukan estimasi koefisien untuk **setiap lag secara terpisah**.\
+
+**Tantangan:** Menentukan berapa banyak lag yang berpengaruh agar tidak kehilangan informasi penting ataupun overfitting.\
+
+**PENENTUAN LAG OPTIMUM**
+```{r}
+finiteDLMauto(formula = AQI ~ o3,
+              data = data.frame(train), q.min = 1, q.max = 30,
+              model.type = "dlm", error.type = "AIC", trace = TRUE)
+```
+Berdasarkan output tersebut, lag optimum didapatkan ketika **lag = 27** dengan AIC terkecil yaitu -98.74. 
+
+**PEMODELAN DLM1: Lag = 27**
+```{r}
+model.dlm <- dlm(x = train$o3 , y = train$AQI, q = 27)
+summary(model.dlm)
+AIC(model.dlm)
+BIC(model.dlm)
+```
+Dari hasil tersebut terdapat beberapa peubah yang berpengaruh signifikan terhadap taraf nyata 5% yaitu $x_t$. Adapun keseluruhan model yang terbentuk adalah
+
+$$
+\hat{Y_t}=52.25144+0.67298X_t+...-0.24443X_{t-27}
+$$
+Adapun hasil peramalan 15 periode kedepan menggunakan model tersebut adalah sebagai berikut
+
+```{r}
+fore.dlm <- dLagM::forecast(model = model.dlm, x=test$o3, h=nrow(test))
+mape.dlm <- MAPE(fore.dlm$forecasts, test$AQI)
+mape.dlm
+GoF(model.dlm)
+```
+
+**PEMODELAN DLM2: Lag = 20**
+```{r}
+model.dlm2 <- dlm(x = train$o3 , y = train$AQI, q = 20)
+summary(model.dlm2)
+AIC(model.dlm2)
+BIC(model.dlm2)
+```
+Dari hasil tersebut terdapat beberapa peubah yang berpengaruh signifikan terhadap taraf nyata 5% yaitu $x_t$, $x_8$, $x_9$, $x_{11}$, dan $x_{12}$. Adapun keseluruhan model yang terbentuk adalah
+
+$$
+\hat{Y_t}=-1.112324+0.44277X_t+...+0.03269X_{t-20}
+$$
+Adapun hasil peramalan 15 periode kedepan menggunakan model tersebut adalah sebagai berikut
+
+```{r}
+fore.dlm2 <- dLagM::forecast(model = model.dlm2, x=test$o3, h=nrow(test))
+mape.dlm2 <- MAPE(fore.dlm2$forecasts, test$AQI)
+mape.dlm2
+GoF(model.dlm2)
+```
+- **MAPE (DLM1) = 23.8% dan terdapat 1 peubah lag yang signifikan pada taraf nyata 5%**
+- **MAPE (DLM2) = 21.1% dan terdapat 5 peubah lag yang signifikan pada taraf nyata 5%**
+- Model DLM2 lebih baik performanya dibanding DLM1.
+
+## C. Autoregressive Distributed Lag Model
+**Intuisi:** ARDL adalah model "hibrida" yang paling lengkap dengan menggabungkan dua ide:
+
+1.  **Distributed Lag (DL):** $Y_t$ dipengaruhi oleh nilai X di masa lalu $(X_{t−1},X_{t−2},\dots)$.
+
+2.  **Autoregressive (AR):** Y_t juga dipengaruhi oleh nilainya sendiri di masa lalu $(Y_{t−1},Y_{t−2},\dots)$. Ini menangkap adanya "momentum" atau "inersia" dalam data.\
+
+Model **ARDL(p, q)**, di mana `p` adalah jumlah lag untuk Y dan `q` adalah jumlah lag untuk X.\
+
+**PEMODELAN LAG OPTIMUM**
+```{r}
+model.ardl.opt <- ardlBoundOrders(data = data.frame(rl), ic = "AIC", 
+                                  formula = AQI ~ o3 )
+model.ardl.opt
+min_p <- apply(model.ardl.opt$Stat.table, 2, min, na.rm = TRUE)
+q_opt <- which.min(min_p)
+p_opt <- which(model.ardl.opt$Stat.table[, q_opt] == min(model.ardl.opt$Stat.table[, q_opt], na.rm = TRUE))
+data.frame("q_optimum" = q_opt, "p_optimum" = p_opt,
+           "AIC" = min(model.ardl.opt$Stat.table, na.rm = TRUE))
+```
+
+```{r}
+model.ardl <- ardlDlm(formula = AQI ~ o3, 
+                         data = train, p = 13, q = 2)
+summary(model.ardl)
+AIC(model.ardl)
+BIC(model.ardl)
+```
+Hasil di atas menunjukkan bahwa selain peubah $x_{t}$ dan $x_{8}$, hasil uji t menunjukkan nilai-p pada peubah $\ge0.05$ Hal ini menunjukkan bahwa peubah $x_{t}$ dan $x_{8}$ berpengaruh signifikan terhadap $y_t$, sementara lainnya tidak berpengaruh signifikan terhadap $y_t$. Model keseluruhannya adalah sebagai berikut:
+
+$$
+\hat{Y}=-0.77136+0.39407X_t+0.20786X_{t-1}+...+0.06633Y_{t-2}
+$$
+**PERAMALAN DAN AKURASI**
+```{r}
+fore.ardl <- dLagM::forecast(model = model.ardl, x=test$o3, h=nrow(test))
+fore.ardl
+```
+Data di atas merupakan hasil peramalan untuk 15 periode ke depan menggunakan Model Autoregressive dengan $p=13$ dan $q=2$.
+
+```{r}
+mape.ardl <- MAPE(fore.ardl$forecasts, test$AQI)
+mape.ardl
+GoF(model.ardl)
+```
+**MAPE = 1.4% dan terdapat 2 peubah distributed lag yang signifikan pada taraf nyata 5%**
+
+# Tahap 6: Perbandingan Model
+
+```{r}
+akurasi <- matrix(c(mape.koyck, mape.dlm, mape.dlm2, mape.ardl))
+row.names(akurasi)<- c("Koyck","DLM 1","DLM 2","Autoregressive")
+colnames(akurasi) <- c("MAPE")
+akurasi
+```
+**Kesimpulan:**\
+Berdasarkan nilai MAPE, model paling optimum didapat pada **Model ARDL** karena memiliki nilai MAPE yang terkecil.
+
+## Plot
+
+```{r}
+plot_all <- data.frame(
+  Time = rep(test$timestamp_utc, 5),
+  AQI = c(
+    test$AQI,                 # Aktual
+    fore.koyck$forecasts,     # Koyck
+    fore.dlm$forecasts,       # DLM
+    fore.dlm2$forecasts,      # DLM2
+    fore.ardl$forecasts       # ARDL
+  ),
+  Model = rep(
+    c("Aktual", "Koyck", "DLM", "DLM2", "ARDL"),
+    each = nrow(test)
+  )
+)
+
+plot_all$Model <- factor(plot_all$Model, levels = c("Koyck", "DLM", "DLM2", "ARDL", "Aktual"))
+
+ggplot(plot_all, aes(x = Time, y = AQI, color = Model, linetype = Model)) +
+  geom_line(size = 0.8) +  
+  geom_line(
+    data = subset(plot_all, Model == "Aktual"),
+    aes(x = Time, y = AQI),
+    color = "black",
+    size = 1.0,       
+    linetype = "solid"
+  ) +
+  scale_color_manual(values = c(
+    "Koyck" = "red",
+    "DLM" = "orange",
+    "DLM2" = "darkgreen",
+    "ARDL" = "blue",
+    "Aktual" = "black"
+  )) +
+  scale_linetype_manual(values = c(
+    "Koyck" = "dashed",
+    "DLM" = "dashed",
+    "DLM2" = "dashed",
+    "ARDL" = "solid",
+    "Aktual" = "solid"
+  )) +
+  labs(
+    title = "Forecast Data Test AQI: Koyck, DLM, DLM2, ARDL vs Aktual",
+    x = "Periode",
+    y = "AQI",
+    color = "Model",
+    linetype = "Model"
+  ) +
+  theme_minimal()
+
+```
+**Kesimpulan:**\
+Berdasarkan plot tersebut, terlihat bahwa plot yang paling mendekati data aktualnya adalah **Model ARDL**, sehingga dapat disimpulkan sebagai model terbaik.
+
+**Catatan Penting:**\
+Model ARDL memang bagus untuk prediksi karena nilai MAPE nya sangat kecil yaitu 1.3%, tetapi jika dilihat dari signifikansi peubah lag nya yang terbatas pada peubah $X_{t}$ dan $X_{t-9}$, dalam konteks interpretasi pengaruh lag $Y$ tidak bisa ditafsirkan mempengaruhi $Y_t$.
+
+# Tahap 7: Pengecekan Asumsi Model Terbaik (ARDL)
+
+```{r}
+#sama dengan model ardl p=13 q=2
+model_dynlm <- dynlm(
+  AQI ~ L(AQI, 1:13) + L(o3, 0:2),
+  data = train.ts
+)
+```
+
+```{r}
+summary(model_dynlm)
+```
+- AQI dipengaruhi langsung oleh peubah $X_t$ (O₃ saat ini), lag sebelumnya kurang berpengaruh.
+
+- Model ARDL(13,2) fit dengan baik secara statistik (Adjusted R² tinggi).
+
+- Lag AQI 1–13 sebagian besar tidak signifikan, dapat dievaluasi untuk model yang lebih sederhana.
+
+**SSE**
+```{r}
+deviance(model_dynlm)
+```
+**Autokorelasi Sisaam**
+```{r}
+dwtest(model_dynlm)
+```
+**Homogenitas Sisaan**
+```{r}
+bptest(model_dynlm)
+```
+**Normalitas Sisaan**
+```{r}
+shapiro.test(residuals(model_dynlm))
+```
+**Kesimpulan:**\
+Semua asumsi sisaan terpenuhi setelah dilakukan regresi dengan peubah lag dan model terbaik didapat dari Autoregressive Distributed Lag Model (ARDL, p=13, q=2).
 
