@@ -227,6 +227,8 @@ dwtest(model)
 -   Kesimpulannya Tolak $H_0$, sudah cukup bukti untuk menyatakan model memiliki autokorelasi. 
 ## B. Asumsi Lainnya
 ```{r}
+library(performance)
+library(sjPlot)
 check_model(model)
 ```
 Berdasarkan uji grafik ini, tidak terdapat amatan berpengaruh yang dapat mengganggu model. Asumsi lainnya dicek lebih lanjut dengan uji formal berikut:\
