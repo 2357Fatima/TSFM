@@ -1,0 +1,471 @@
+---
+title: "Model Deret Waktu: MA(2), AR(2), ARMA(2,2)"
+author: "Fatima Azzahra - G1401231036"
+date: "2025-09-21"
+output: 
+html_document:
+    toc: true
+    toc_depth: 4
+    toc_float: true
+    css: "D:/style.css"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# Proses MA(2)
+
+## Pembangkitan Model
+
+### Manual
+
+**Pembangkitan White Noise** $(e_t)$\
+
+```{r}
+set.seed(1036)
+wn <- rnorm(300) #sebaran normal
+ts.plot(wn)
+```
+
+**Pembangkitan Manual Model MA(2) dengan Proses Looping**
+
+$$
+Y_t = e_t+0.4e_{t-1}+0.6e_{t-2}
+$$
+
+```{r}
+ma <- wn[c(1,2)] # nilai Yt untuk t=1,2 diisi dengan et untuk t=1,2
+```
+
+```{r}
+# looping dari t=3 karena butuh 2 white noise sebelumnya yaaitu e_t-1 dan e_t-2
+for(t in 3:300){
+   ma[t] <- wn[t] + 0.4 * wn[t - 1] + 0.6 * wn[t - 2]
+}
+ma
+```
+### Fungsi arima.sim
+
+```{r}
+set.seed(1036)
+ma_arima <- arima.sim(model = list(order = c(0,0,2), ma = c(0.4,0.6)), n = 300)
+ma_arima
+```
+
+```{r}
+par(mfrow=c(2,1))
+ts.plot(ma, main="MA(2) manual", ylab="Yt")
+ts.plot(ma_arima, main="MA(2) arima.sim", ylab="Yt")
+```
+
+## Karakteristik MA(2)
+
+### Plot Time Series
+
+```{r}
+ts.plot(ma)
+```
+Berdasarkan plot time series, terlihat bahwa data MA(2) yang dibangkitkan stasioner dalam rataan.
+
+### Plot ACF (Cut off di lag berapa)
+
+```{r}
+acf(ma,lag.max = 20)
+```
+Berdasarkan plot AFC tersebut, terlihat bahwa plot ACF *cuts off* di lag pertama dan kedua.
+
+### Plot PACF (Tails off di lag berapa)
+
+```{r}
+pacf(ma)
+```
+Berdasarkan plot PACF tersebut, terlihat bahwa plot PACF cenderung *tails off* dan membentuk gelombang sinus.
+
+### Plot EACF (Kalo di ACF PACF Cut off dan Tails off sama, pastikan dengan EACF)
+
+```{r}
+TSA::eacf(ma)
+```
+Berdasarkan pola segitiga nol pada plot EACF, terlihat bahwa segitiga nol berada pada ordo AR(0) dan ordo MA(2).
+
+### Scatterplot Antar Lag
+
+**Korelasi antara Y_t dengan Y_{t-1}**
+
+```{r}
+#Yt
+yt_ma <- ma[-1]
+#Yt-1
+yt_1_ma <- ma[-300]
+```
+
+```{r}
+plot(y=yt_ma,x=yt_1_ma)
+```
+Berdasarkan scatterplot tersebut, terlihat bahwa terdapat hubungan positif antara $Y_t$ dengan $Y_{t-1}$. Hal ini sesuai dengan teori yang ada.
+
+```{r}
+cor(yt_ma,yt_1_ma)
+```
+Korelasi antara $Y_t$ dengan $Y_{t-1}$ dari hasil simulasi mendekati perhitungan teoritis yaitu
+
+$$
+\rho_1=\frac{\theta_1 + \theta_1 \theta_2}{1+\theta_1^2+\theta_2^2}=\frac{(0.4)+(0.24)}{1+(0.4)^2+(0.6)^2}=0.42
+$$
+
+**Korelasi antara Y_t dengan Y_{t-2}**
+
+```{r}
+#YT
+yt_ma   <- ma[-c(1,2)]  
+#Yt-2
+yt_2_ma  <- ma[-c(299,300)]    
+```
+
+```{r}
+plot(y=yt_ma,x=yt_2_ma)
+```
+Berdasarkan scatterplot tersebut, terlihat bahwa terdapat hubungan positif antara $Y_t$ dengan $Y_{t-2}$. Hal ini sesuai dengan teori yang ada.
+
+```{r}
+cor(yt_ma,yt_2_ma)
+```
+Korelasi antara $Y_t$ dengan $Y_{t-2}$ dari hasil simulasi mendekati perhitungan teoritis yaitu
+
+$$
+\rho_1=\frac{\theta_2}{1+\theta_1^2+\theta_2^2}=\frac{(0.6)}{1+(0.4)^2+(0.6)^2}=0.39
+$$
+
+**Korelasi antara Y_t dengan Y_{t-3}**
+
+```{r}
+#YT
+yt_ma   <- ma[-c(1,2,3)]  
+#Yt-2
+yt_3_ma  <- ma[-c(298,299,300)]    
+```
+
+```{r}
+plot(y=yt_ma,x=yt_3_ma)
+```
+Berdasarkan scatterplot tersebut, terlihat bahwa cenderung tidak terdapat hubungan antara $Y_t$ dengan $Y_{t-3}$.
+
+```{r}
+cor(yt_ma,yt_3_ma)
+```
+Korelasi antara $Y_t$ dengan $Y_{t-2}$ hasil simulasi mendekati teori yang ada yaitu 0.
+
+# Proses AR(2)
+
+## Pembangkitan Model
+
+### Manual
+
+$$ Y_t = e_t+0.5Y_{t-1}+0.2Y_{t-2} $$
+
+```{r}
+set.seed(1036)
+wn <- rnorm(300)
+n<-length(wn)
+n
+```
+```{r}
+# Nilai Yt untuk t=1,2 di set 1 dan 2
+ar <- c(1:n)
+```
+
+```{r}
+for (t in 3:300){
+  ar[t] <- wn[t] + 0.5 * ar[t-1] + 0.2 * ar[t-2]
+  }
+ar
+```
+
+### Fungsi arima.sim
+
+```{r}
+ar_arima <- arima.sim(model = list(order = c(2,0,0), ar = c(0.5,0.2)), n = n)
+ar_arima
+```
+
+## Karakteristik AR(2)
+
+### Plot Time Series
+
+```{r}
+ts.plot(ar,  main = "AR(2) manual")
+```
+Berdasarkan plot time series tersebut terlihat bahwa data cenderung stasioner pada rataan.
+
+```{r}
+ts.plot(ar_arima,  main = "AR(2) arima.sim")
+```
+
+### Plot ACF (di AR Tails off)
+
+```{r}
+acf(ar)
+```
+Berdasarkan plot ACF tersebut terlihat bahwa plot ACF cenderung *tails off* dan cenderung membentuk pola grafik sinus.
+
+### Plot PACF (di AR Cut off)
+
+```{r}
+pacf(ar)
+```
+Berdasarkan plot PACF tersebut, terlihat bahwa plot PACF *cuts off* di lag-1 dan lag-2. Hal ini sesuai dengan teori.
+
+### Plot EACF
+
+```{r}
+TSA::eacf(ar)
+```
+Berdasarkan pola segitiga nol pada plot EACF, terlihat bahwa segitiga nol berada pada ordo AR(2) dan ordo MA(0).\
+
+### Scatterplot Antar Lag
+
+**Korelasi antara Y_t dengan Y_{t-1}**
+
+```{r}
+#Yt
+yt_ar <- ar[-1]
+#Yt-1
+yt_1_ar <- ar[-300]
+```
+
+```{r}
+plot(y=yt_ar,x=yt_1_ar)
+```
+Berdasarkan scatterplot tersebut, terlihat bahwa terdapat hubungan positif antara $Y_t$ dengan $Y_{t-1}$. Hal ini sesuai dengan teori yang ada.
+
+```{r}
+cor(yt_ar,yt_1_ar)
+```
+
+Korelasi antara $Y_t$ dengan $Y_{t-1}$ dari hasil simulasi mendekati perhitungan teoritis yaitu
+
+$$\rho_1= \frac{\phi_1}{1-\phi_2}=\frac{0.5}{1-0.2}=0.6$$
+
+**Korelasi antara Y_t dengan Y_{t-2}**
+
+```{r}
+#Yt
+yt_ar <- ar[-c(1,2)]
+#Yt-2
+yt_2_ar <- ar[-c(299,300)]
+```
+
+```{r}
+plot(y=yt_ar,x=yt_2_ar)
+```
+Berdasarkan scatterplot tersebut, terlihat bahwa terdapat hubungan positif antara $Y_t$ dengan $Y_{t-2}$. Hal ini sesuai dengan teori yang ada.
+
+```{r}
+cor(yt_ar,yt_2_ar)
+```
+Korelasi antara $Y_t$ dengan $Y_{t-2}$ dari hasil simulasi mendekati perhitungan teoritis yaitu
+
+$$\rho_1= \phi_1\rho_1+ \phi_2 \rho_0=(0.5)(0.6)+(0.2)=0.5$$
+
+**Korelasi antara Y_t dengan Y_{t-3}**
+
+```{r}
+#Yt
+yt_ar <- ar[-c(1,2,3)]
+#Yt-2
+yt_3_ar <- ar[-c(298,299,300)]
+```
+
+```{r}
+plot(y=yt_ar,x=yt_3_ar)
+```
+
+Berdasarkan scatterplot tersebut, terlihat bahwa terdapat hubungan positif antara $Y_t$ dengan $Y_{t-3}$. Hal ini sesuai dengan teori yang ada.
+
+```{r}
+cor(yt_ar,yt_3_ar)
+```
+Korelasi antara $Y_t$ dengan $Y_{t-2}$ dari hasil simulasi mendekati perhitungan teoritis yaitu
+
+$$\rho_1= \phi_1\rho_2+ \phi_2 \rho_1=(0.5)(0.5)+(0.2)(0.6)=0.3$$
+
+# Proses ARMA(2,2)
+
+## Pembangkita Model
+
+### Manual
+
+$$
+Y_{t} = 0.5Y_{t-1} + 0.2Y_{t-2} + 0.4e_{t-1}+0.6e_{t-2}+ e_{t}
+$$
+
+```{r}
+set.seed(1036)
+wn <- rnorm(300)         
+
+phi1 <- 0.5
+phi2 <- 0.2
+theta1 <- 0.4
+theta2 <- 0.6
+
+y.arma <- numeric(300)
+# inisialisasi nilai awal
+y.arma[1:2] <- 0
+
+for (i in 3:300) {
+  y.arma[i] <- phi1*y.arma[i-1] + phi2*y.arma[i-2] +
+               wn[i] + theta1*wn[i-1] + theta2*wn[i-2]
+}
+
+y.arma
+```
+
+### Fungsi arima.sim
+```{r}
+arma_arima <- arima.sim(model = list(order = c(2,0,2), ar = c(0.5, 0.2), ma = c(0.4, 0.6)), n = 300)
+arma_arima
+```
+
+## Karakteristik ARMA(2,2)
+
+### Plot Time Series
+
+```{r}
+par(mfrow = c(2, 1))
+ts.plot(y.arma, main = "ARMA(2,2) manual")
+ts.plot(arma_arima,  main = "ARMA(2,2) arima.sim")
+```
+
+```{r}
+ts.plot(y.arma,  main = "ARMA(2,2) manual")
+```
+Berdasarkan plot time series tersebut, terlihat bahwa model ARMA(2,2) cenderung stasioner dalam rataan.
+
+### Plot ACF
+
+```{r}
+par(mfrow = c(1, 2))
+acf(y.arma)
+acf(arma_arima)
+```
+Berdasarkan plot ACF tersebut, terlihat bahwa model ARMA(2,2) hasil simulasi memiliki plot ACF yang *tails off*, sesuai dengan teori yang ada
+
+### Plot PACF
+
+```{r}
+par(mfrow = c(1, 2))
+pacf(y.arma)
+pacf(arma_arima)
+```
+Berdasarkan plot PACF tersebut, terlihat bahwa model ARMA(2,2) hasil simulasi memiliki plot PACF yang *tails off*, sesuai dengan teori.
+
+### Plot EACF
+
+```{r}
+TSA::eacf(y.arma)
+TSA::eacf(arma_arima)
+```
+Berdasarkan pola segitiga nol pada plot EACF, terlihat bahwa segitiga nol berada pada ordo AR(2) dan ordo MA(2)
+
+### Scatterplot Antar Lag
+
+**Korelasi antara Y_t dengan Y_{t-1}**
+
+```{r}
+#Yt
+yt_arma <- arma_arima[-1]
+#Yt-1
+yt_1_arma <- arma_arima[-300]
+```
+
+
+```{r}
+plot(y=yt_arma,x=yt_1_arma)
+```
+
+Berdasarkan scatterplot tersebut, terlihat bahwa terdapat hubungan positif antara $Y_t$ dengan $Y_{t-1}$. Hal ini sesuai dengan teori yang ada
+
+```{r}
+cor(yt_arma,yt_1_arma)
+```
+Korelasi antara $Y_t$ dengan $Y_{t-1}$ dari hasil simulasi mendekati perhitungan teoritis. 
+
+$$
+\rho_1 = 
+\frac{
+\phi_1\phi_2\theta_2+\phi_1\theta_1^{2}+\phi_1\theta_2^{2}+\phi_1-\phi_2\theta_1^{2}-\phi_2\theta_2^{2}-\phi_2-\theta_1-\theta_1\theta_2
+}{
+\phi_{1}^{2}\theta_{1}^{2}+\phi_{1}^{2}\theta_{2}^{2}-\phi_{1}^{2}\theta_{2}-\phi_{1}\phi_{2}\theta_{1}^{2}-\phi_{1}\phi_{2}\theta_{2}^{2}+\phi_{1}\phi_{2}\theta_{2}+\phi_{1}\phi_{2}-\phi_{1}\theta_{1}^{2}-\phi_{1}\theta_{2}^{2}+\phi_{1}+\phi_{2}\theta_{1}^{2}+\phi_{2}\theta_{2}^{2}+\phi_{2}\theta_{2}-\phi_{2}+\theta_{1}^{2}+\theta_{2}^{2}+1
+}
+$$
+
+Jika disubtitusi dengan $\phi_1=0.5$, $\phi_2=0.2$, $\theta_1=0.4$ dan $\theta_1=0.6$, nilai $\rho_1=0.8$
+
+**Korelasi antara Y_t dengan Y_{t-2}**
+
+```{r}
+#Yt
+yt_arma <- arma_arima[-c(1,2)]
+#Yt-1
+yt_2_arma <- arma_arima[-c(299,300)]
+```
+
+
+```{r}
+plot(y=yt_arma,x=yt_2_arma)
+```
+
+Berdasarkan scatterplot tersebut, terlihat bahwa terdapat hubungan positif antara $Y_t$ dengan $Y_{t-1}$. Hal ini sesuai dengan teori yang ada
+
+```{r}
+cor(yt_arma,yt_2_arma)
+```
+Korelasi antara $Y_t$ dengan $Y_{t-2}$ dari hasil simulasi mendekati perhitungan teoritis. 
+
+$$
+\rho_2 = 
+\frac{
+\phi_{1}^{2}\theta_{1}^{2}+\phi_{1}^{2}\theta_{2}^{2}-\phi_{1}^{2}\theta_{2}+\phi_{1}\phi_{2}\theta_{1}^{2}+\phi_{1}\phi_{2}\theta_{2}^{2}-\phi_{1}\phi_{2}\theta_{2}+\phi_{2}\theta_{1}^{2}+\phi_{2}\theta_{2}^{2}+\phi_{2}\theta_{2}-\phi_{2}+\theta_{1}^{2}+\theta_{2}^{2}+1
+}{
+\phi_{1}^{2}\theta_{1}^{2}+\phi_{1}^{2}\theta_{2}^{2}-\phi_{1}^{2}\theta_{2}-\phi_{1}\phi_{2}\theta_{1}^{2}-\phi_{1}\phi_{2}\theta_{2}^{2}+\phi_{1}\phi_{2}\theta_{2}+\phi_{1}\phi_{2}-\phi_{1}\theta_{1}^{2}-\phi_{1}\theta_{2}^{2}+\phi_{1}+\phi_{2}\theta_{1}^{2}+\phi_{2}\theta_{2}^{2}+\phi_{2}\theta_{2}-\phi_{2}+\theta_{1}^{2}+\theta_{2}^{2}+1
+}
+$$
+
+Jika disubtitusi dengan $\phi_1=0.5$, $\phi_2=0.2$, $\theta_1=0.4$ dan $\theta_1=0.6$, nilai $\rho_2=0.7$
+
+**Korelasi antara Y_t dengan Y_{t-3}**
+
+```{r}
+#Yt
+yt_arma <- arma_arima[-c(1,2,3)]
+#Yt-1
+yt_3_arma <- arma_arima[-c(298,299,300)]
+```
+
+
+```{r}
+plot(y=yt_arma,x=yt_3_arma)
+```
+
+Berdasarkan scatterplot tersebut, terlihat bahwa terdapat hubungan positif antara $Y_t$ dengan $Y_{t-1}$. Hal ini sesuai dengan teori yang ada
+
+```{r}
+cor(yt_arma,yt_3_arma)
+```
+Korelasi antara $Y_t$ dengan $Y_{t-1}$ dari hasil simulasi mendekati perhitungan teoritis. 
+
+$$
+\rho_3 = 
+\frac{
+\phi_{1}\big(\phi_{1}^{2}\theta_{1}^{2}+\phi_{1}^{2}\theta_{2}^{2}-\phi_{1}^{2}\theta_{2}+\phi_{1}\phi_{2}\theta_{1}^{2}+\phi_{1}\phi_{2}\theta_{2}^{2}-\phi_{1}\phi_{2}\theta_{2}+\phi_{2}\theta_{1}^{2}+\phi_{2}\theta_{2}^{2}+\phi_{2}\theta_{2}-\phi_{2}+\theta_{1}^{2}+\theta_{2}^{2}+1\big)
+}{
+\phi_{1}^{2}\theta_{1}^{2}+\phi_{1}^{2}\theta_{2}^{2}-\phi_{1}^{2}\theta_{2}-\phi_{1}\phi_{2}\theta_{1}^{2}-\phi_{1}\phi_{2}\theta_{2}^{2}+\phi_{1}\phi_{2}\theta_{2}+\phi_{1}\phi_{2}-\phi_{1}\theta_{1}^{2}-\phi_{1}\theta_{2}^{2}+\phi_{1}+\phi_{2}\theta_{1}^{2}+\phi_{2}\theta_{2}^{2}+\phi_{2}\theta_{2}-\phi_{2}+\theta_{1}^{2}+\theta_{2}^{2}+1
+}
+$$
+
+Jika disubtitusi dengan $\phi_1=0.5$, $\phi_2=0.2$, $\theta_1=0.4$ dan $\theta_1=0.6$, nilai $\rho_2=0.5$
+
+
+
+
