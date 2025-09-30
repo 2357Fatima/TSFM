@@ -1,0 +1,244 @@
+---
+title: "Tugas MPDW Prak"
+author: "Fatima Azzahra - G1401231036"
+date: "2025-09-30"
+output:
+  html_document:
+    toc: true
+    toc_depth: 4
+    toc_float: true
+    css: "D:/style.css"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
+library("lubridate")
+library("readr")
+library("readxl")
+library("dplyr")
+library("forecast")
+library("graphics")
+library("TTR")
+library("TSA")
+library("ggplot2")
+```
+
+```{r}
+library(tseries)
+library(tsibble)
+library(MASS)
+```
+
+# 1. Penyiapan Partisi Data
+
+**Deskripsi**\
+Dataset ini merupakan pencatatan berbagai macam komponen terkait cuaca dengan periode pencatatan per 10 menit dari tanggal 1 Januari 2020 sampai 31 Desember 2020. Analisis akan difokuskan pada peubah VPdef (Vapor Pressure Deficit).
+
+Terkait cakupan analisis untuk tugas ini, akan dianalisis 100 baris pertama untuk peubah VPdef dengan cakupan periodenya yaitu 1 Januari 2020 pada menit ke-10 sampai 16:40.
+
+```{r}
+weather <- read_csv("D:\\TAHUN 3\\G1_MPDW\\cleaned_weather.csv")
+View(weather)
+str(weather)
+```
+
+```{r}
+# Change date format from chr to datetime
+weather <- weather %>%
+  mutate(datetime = mdy_hm(date))
+# new dataframe with datetime and VPdef as respond variable
+weather1 <- weather %>%
+  dplyr::select(datetime, VPdef)
+View(weather1)
+str(weather1)
+```
+
+```{r}
+# Check if there's missing value from time frequency per day
+weather1 %>%
+  group_by(date_only = as.Date(datetime)) %>%
+  summarise(n_obs = n(), .groups = "drop") %>%
+  filter(n_obs != 144)
+```
+
+**Note: Missing Value and Duplicate**
+
+Per hari harusnya memiliki **144 observasi** karena mencatat data parameter cuaca dalam 24 jam per 10 menit. Hasil filtering tersebut mengindikasikan adanya missing value dan duplicate yang perlu ditangani bila analisis melibatkan observasi tersebut. Khusus pada data 2020-01-01 memang dicatat dari menit ke-10, data pada tanggal **5 dan 12 Mei 2020** saja yang perlu ditangani.
+
+```{r}
+# Create the data subset
+w1 <- weather1[1:100,]
+head(w1, 20)
+View(w1)
+```
+
+```{r}
+# Change the data format to time series using 'ts' function
+w1.ts <- ts(w1$VPdef)
+summary(w1.ts)
+w1.ts
+```
+
+**Note: Time Series Data Frequency**
+
+Pada tahap eksplorasi awal ini digunakan frequency = 1 karena baru mengamati observasi dalam skala yang kecil.
+
+# 2. Plot Time Series
+
+```{r}
+ts.plot(w1.ts, xlab="Time Period", ylab="VPdef", 
+        main = "1 Jan (0:10 - 16:40)")
+points(w1.ts)
+```
+
+Berdasarkan plot, data deret waktunya mengindikasikan **tidak stasioner pada rataam dan ragam**.
+
+# 3. Plot ACF
+```{r}
+acf(w1.ts)
+```
+
+Plot ACF menunjukkan penurunan yang lambat pada lag nya. Hal ini mengindikasikan data tak stasioner dalam rataan.
+
+# 4. Uji ADF
+
+```{r}
+tseries::adf.test(w1.ts)
+```
+
+Berdasarkan uji ADF tersebut, didapat *p-value* lebih besar dari taraf nyata 5% sehingga Tak Tolak $H_0$ dan menandakan bahwa **data tidak stasioner dalam rataan**. Hal ini sesuai dengan hasil eksplorasi menggunakan plot time series dan plot ACF.
+
+# 5. Plot Box-Cox
+
+```{r}
+index <- seq(1, 100)
+
+# Uji Box-Cox
+bc <- boxcox(
+  w1.ts ~ index,
+  lambda = seq(-2,2, by = 0.1)
+)
+
+# Nilai lambda optimum
+lambda <- bc$x[which.max(bc$y)]
+lambda
+
+# Selang kepercayaan 95% untuk lambda
+ci_lambda <- bc$x[bc$y > max(bc$y) - 0.5 * qchisq(0.95, 1)]
+
+# Batas bawah dan batas atas
+ci_lower <- min(ci_lambda)
+ci_upper <- max(ci_lambda)
+
+c(Batas_Bawah = ci_lower, Batas_Atas = ci_upper)
+```
+
+Selang lambda tidak mengandung satu [-0.1414141, 0.3838384] sehingga **data tidak stasioner juga dalam ragam.**
+
+# 6. Diferensiasi
+
+Dalam analisis deret waktu, differencing merupakan salah satu prosedur
+transformasi yang digunakan untuk memperoleh sifat stasioneritas dalam
+rataan. Metode ini dilakukan dengan menghitung selisih nilai observasi
+antar periode sehingga pola tren atau ketidakstasioneran dalam rataan
+dapat dieliminasi.
+
+Secara umum, pembedaan pertama ditulis sebagai:
+
+$$
+\nabla Y_t = Y_t - Y_{t-1}
+$$
+
+Jika tren linier masih tersisa/ belum stasioner, dapat dilakukan
+differencing kedua:\
+$$
+\nabla^2 Y_t = \nabla (\nabla Y_t) = Y_t - 2Y_{t-1} + Y_{t-2}
+$$
+
+## Diferensiasi Pertama
+
+```{r}
+# Differencing pertama pada postrend
+w1_diff1 <- diff(w1.ts, differences = 1)
+
+# Plot hasil differencing
+ts.plot(w1_diff1,
+        main = "Diferensiasi Satu Kali",
+        col = "blue", lwd = 2)
+
+```
+
+**Plot ACF: Diferensiasi 1 Kali**
+```{r}
+acf(w1_diff1)
+```
+
+Plot ACF masih menunjukkan penurunan yang teratur, indikasi data belum stasioner dalam rataan.\
+
+**Uji ADF: Diferensiasi 1 Kali**
+
+```{r}
+adf.test(w1_diff1)
+```
+
+Berdasarkan uji ADF tersebut, didapat *p-value* sebesar 0.47 yang lebih besar dari taraf nyata 5% sehingga Tak Tolak $H_0$ dan menandakan bahwa **data masih stasioner dalam rataan**. Sehingga perlu dilakukan diferensiasi kedua.
+
+## Diferensiasi Kedua
+
+```{r}
+# Differencing pertama pada postrend
+w1_diff2 <- diff(w1.ts, differences = 2)
+
+# Plot hasil differencing
+ts.plot(w1_diff2,
+        main = "Diferensiasi Satu Kali",
+        col = "blue", lwd = 2)
+
+```
+
+**Plot ACF: Diferensiasi 2 Kali**
+```{r}
+acf(w1_diff2)
+```
+
+**Uji ADF: Diferensiasi 2 Kali**
+
+```{r}
+adf.test(w1_diff2)
+```
+
+Berdasarkan uji ADF tersebut, didapat *p-value* sebesar 0.01 yang lebih kecil dari taraf nyata 5% sehingga Tolak $H_0$ dan menandakan bahwa **data sudah stasioner dalam rataan**.
+
+## Plot Box-Cox
+```{r}
+index <- seq_along(w1_diff2)
+
+# Uji Box-Cox
+bc <- boxcox(
+  (w1_diff2 - min(w1_diff2) + 1) ~ index,
+  lambda = seq(-2, 2, by = 0.1)
+)
+
+# Nilai lambda optimum
+lambda <- bc$x[which.max(bc$y)]
+lambda
+
+# Selang kepercayaan 95% untuk lambda
+ci_lambda <- bc$x[bc$y > max(bc$y) - 0.5 * qchisq(0.95, 1)]
+
+# Batas bawah dan batas atas
+ci_lower <- min(ci_lambda)
+ci_upper <- max(ci_lambda)
+
+c(Batas_Bawah = ci_lower, Batas_Atas = ci_upper)
+```
+
+Selang lambda mengandung satu [0.02020202, 2.00000000] sehingga **data stasioner dalam ragam** juga setelah diferensiasi 2 kali.
+
+# 7. Simpulan
+Data cuaca 100 baris pertama (peubah VPdef) memiliki plot deret waktu yang mengindikasikan pola yang tidak stasioner baik dalam rataan maupun ragam. Hal ini terbukti dengan plot ACF yang mengalami penurunan secara lambat pada lagnya, Uji ADF dengan p-value lebih besar dari 5% serta selang kepercayaan lambda pada plot Box-cox tidak mengandung nilai 1.\
+
+Setelah dilakukan diferensiasi 1 kali, stasioneritas rataan belum teratasi dan dilanjut percobaan dengan diferensiasi 2 kali. Hasilnya data stasioner dalam rataan berdasarkan nilai p-value uji ADF sebesar 0.01 yang lebih kecil dari 5% dan plot Box-cox yang mengandung nilai satu dalam selang kepercayaannya.\
